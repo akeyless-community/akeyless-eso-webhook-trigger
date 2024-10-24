@@ -1,0 +1,8 @@
+{
+    "recommendations": [
+        "metalbear.mirrord",
+        "task.vscode-task",
+        "golang.go",
+        "ms-azuretools.vscode-docker"
+    ]
+}

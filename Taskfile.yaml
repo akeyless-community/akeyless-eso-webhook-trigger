@@ -1,0 +1,216 @@
+version: "3"
+
+vars:
+  IMAGE_NAME: devorbitus/eso-updater
+  PLATFORMS: linux/arm64,linux/amd64
+  DOCKER_BUILD_ARGS: ""
+  KUBECTL_CONTEXT: cs-gke-sandbox
+  KUBECTL_NAMESPACE: cgruel-sra
+
+tasks:
+  build:
+    aliases:
+      - b
+    desc: Build the docker image
+    sources:
+      - Dockerfile
+      - VERSION
+      - go.mod
+      - go.sum
+      - ./**/*.go
+      - static/openapi.json
+    requires:
+      vars:
+        - PLATFORMS
+        - IMAGE_NAME
+        - DOCKER_BUILD_ARGS
+    vars:
+      IMAGE_VERSION:
+        sh: task get-version -s
+    cmds:
+      - docker buildx build --platform {{.PLATFORMS}} -t {{.IMAGE_NAME}}:{{.IMAGE_VERSION}} -t {{.IMAGE_NAME}}:latest . {{.DOCKER_BUILD_ARGS}}
+
+  push:
+    aliases:
+      - p
+    desc: Build and Push the docker image to the registry
+    deps:
+      - task: test
+    requires:
+      vars:
+        - IMAGE_NAME
+        - PLATFORMS
+        - DOCKER_BUILD_ARGS
+    vars:
+      IMAGE_VERSION:
+        sh: task get-version -s
+    cmds:
+      - docker buildx build --platform {{.PLATFORMS}} -t {{.IMAGE_NAME}}:{{.IMAGE_VERSION}} -t {{.IMAGE_NAME}}:latest . {{.DOCKER_BUILD_ARGS}} --push
+      - task: update-all-versions
+
+  k8scontext:
+    internal: true
+    requires:
+      vars:
+        - KUBECTL_CONTEXT
+        - KUBECTL_NAMESPACE
+    desc: "Set kubectl context and namespace"
+    cmds:
+      - kubectl config use-context "{{.KUBECTL_CONTEXT}}"
+      - kubectl config set-context --current --namespace="{{.KUBECTL_NAMESPACE}}"
+
+  test:
+    aliases:
+      - t
+    desc: Test the code
+    cmds:
+      - go test -v ./...
+
+  get-version:
+    requires:
+      vars:
+        - ROOT_DIR
+    aliases:
+      - gv
+    desc: Get the version of the application
+    cmds:
+      - semver $(cat {{.ROOT_DIR}}/VERSION)
+
+  increment-patch-version:
+    aliases:
+      - ipatch
+    desc: Increment the patch version of the application
+    cmds:
+      - task: increment-semver-level
+        vars:
+          SEMVER_LEVEL: patch
+
+  increment-minor-version:
+    aliases:
+      - iminor
+    desc: Increment the minor version of the application
+    cmds:
+      - task: increment-semver-level
+        vars:
+          SEMVER_LEVEL: minor
+
+  increment-major-version:
+    aliases:
+      - imajor
+    desc: Increment the major version of the application
+    cmds:
+      - task: increment-semver-level
+        vars:
+          SEMVER_LEVEL: major
+
+  update-all-versions:
+    aliases:
+      - uav
+    desc: Update the version of the application in all files
+    cmds:
+      - task: update-kustomization-version
+      - task: update-openapi-version
+
+  update-kustomization-version:
+    aliases:
+      - ukv
+    desc: Update the version of the application in the kustomization file
+    requires:
+      vars:
+        - IMAGE_NAME
+    vars:
+      IMAGE_VERSION:
+        sh: task get-version -s
+    cmds:
+      - kustomize edit set image {{.IMAGE_NAME}}={{.IMAGE_NAME}}:{{.IMAGE_VERSION}}
+
+  update-openapi-version:
+    aliases:
+      - uov
+    desc: Update the version of the openapi spec
+    requires:
+      vars:
+        - ROOT_DIR
+    vars:
+      OPENAPI_VERSION:
+        sh: task get-version -s
+    cmds:
+      - jq --indent 4 '.info.version = "{{.OPENAPI_VERSION}}"' {{.ROOT_DIR}}/static/openapi.json > {{.ROOT_DIR}}/static/openapi.tmp && mv {{.ROOT_DIR}}/static/openapi.tmp {{.ROOT_DIR}}/static/openapi.json
+
+  deploy:
+    aliases:
+      - d
+    desc: Deploy the application to the cluster
+    cmds:
+      - task: internal-wrap-kubectl-task-with-context
+        vars:
+          WRAPPED_TASK_NAME: internal-deploy-or-undeploy
+          KUBECTL_COMMAND: apply
+
+  build-push-deploy:
+    aliases:
+      - bpd
+    desc: Build, push and deploy the application to the cluster
+    cmds:
+      - task: push
+      - task: deploy
+
+  increment-build-push-deploy:
+    aliases:
+      - ibpd
+    desc: Build, push and deploy the application to the cluster
+    cmds:
+      - task: increment-patch-version
+      - task: build-push-deploy
+
+  undeploy:
+    aliases:
+      - ud
+    desc: Undeploy the application from the cluster
+    cmds:
+      - task: internal-wrap-kubectl-task-with-context
+        vars:
+          WRAPPED_TASK_NAME: internal-deploy-or-undeploy
+          KUBECTL_COMMAND: delete
+
+  increment-semver-level:
+    internal: true
+    aliases:
+      - isl
+    desc: Increment the semver level of the application
+    requires:
+      vars:
+        - ROOT_DIR
+    vars:
+      SEMVER_VERSION:
+        sh: cat {{.ROOT_DIR}}/VERSION
+    cmds:
+      - semver {{.SEMVER_VERSION}} -i {{.SEMVER_LEVEL}} > {{.ROOT_DIR}}/VERSION
+
+  internal-deploy-or-undeploy:
+    internal: true
+    desc: Internal task to deploy the application to the cluster using kustomize
+    requires:
+      vars:
+        - KUBECTL_CONTEXT
+        - KUBECTL_NAMESPACE
+        - KUBECTL_COMMAND
+    cmds:
+      - kubectx {{.KUBECTL_CONTEXT}}
+      - kubectl {{.KUBECTL_COMMAND}} -n {{.KUBECTL_NAMESPACE}} -k .
+
+  internal-wrap-kubectl-task-with-context:
+    internal: true
+    desc: Store the existing kubectl context to allow task to change it then switch back
+    requires:
+      vars:
+        - WRAPPED_TASK_NAME
+        - KUBECTL_COMMAND
+    vars:
+      PREVIOUS_KUBECTL_CONTEXT:
+        sh: kubectx -c
+    cmds:
+      - task: "{{.WRAPPED_TASK_NAME}}"
+        vars:
+          KUBECTL_COMMAND: "{{.KUBECTL_COMMAND}}"
+      - kubectx {{.PREVIOUS_KUBECTL_CONTEXT}}

@@ -1,0 +1,20 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+images:
+- name: devorbitus/eso-updater
+  newName: devorbitus/eso-updater
+  newTag: 1.0.6
+
+secretGenerator:
+- envs:
+  - configs/.env
+  name: externalsecret-updater-user-secret
+
+resources:
+- manifests/service-account.yaml
+- manifests/deployment.yaml
+- manifests/service.yaml
+- manifests/role.yaml
+- manifests/role-binding.yaml
+- manifests/ingress.yaml

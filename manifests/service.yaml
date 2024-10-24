@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: externalsecret-updater-service
+spec:
+  selector:
+    app: externalsecret-updater
+  ports:
+    - name: http
+      port: 80
+      targetPort: 9000
+      protocol: TCP
+  type: ClusterIP

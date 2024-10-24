@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: externalsecret-updater
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: externalsecret-updater
+  template:
+    metadata:
+      labels:
+        app: externalsecret-updater
+    spec:
+      serviceAccountName: externalsecret-updater-sa
+      containers:
+        - name: eso-updater
+          image: devorbitus/eso-updater:latest
+          ports:
+            - containerPort: 9000
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "500m"
+            limits:
+              memory: "256Mi"
+              cpu: "1000m"
+          envFrom:
+            - secretRef:
+                name: externalsecret-updater-user-secret
