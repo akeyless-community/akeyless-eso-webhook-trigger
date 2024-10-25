@@ -1,6 +1,8 @@
 # Akeyless External Secrets Updater
 
-This application enables a push-based model for updating ExternalSecrets in a Kubernetes cluster. It listens for webhooks triggered by secret updates in the SecretStore and propagates these changes to the corresponding ExternalSecret resources, initiating the secret update process.
+This application enables a push-based model for updating ExternalSecrets in a Kubernetes cluster. It listens for webhooks triggered by secret updates in the Secret Store Provider (which can be Akeyless or any other supported ESO Secret Store Provider) and propagates these changes to the corresponding ExternalSecret resources, initiating the secret update process.
+
+In short, this application makes it so that you can update a secret in the Secret Store Provider and have it automatically updated in the corresponding ExternalSecret resource in Kubernetes almost immediately without the need to set a frequent `refreshInterval` on the ExternalSecret resource to be sure to pick up the most recent.
 
 
 ## Features
