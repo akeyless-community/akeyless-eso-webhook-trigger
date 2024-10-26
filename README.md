@@ -94,14 +94,52 @@ Before using the Taskfile commands, ensure you have the following CLIs installed
 ### Deployment Process
 
 1. Set up your environment variables in `configs/.env`.
-2. Build and push the Docker image: `task push`
-3. Deploy the application: `task deploy`
 
-For a complete build, push, and deploy process, you can use: `task build-push-deploy`
+2. Update the default variables in `Taskfile.yaml`:
+   - Set `KUBECTL_CONTEXT` to your desired Kubernetes context.
+   - Set `KUBECTL_NAMESPACE` to your target namespace.
 
-To increment the version, build, push, and deploy in one command, use: `task increment-build-push-deploy`
+   You can find these variables at the top of the Taskfile:
 
-Make sure to set the appropriate Kubernetes context and namespace in the Taskfile or use environment variables to override the defaults.
+   ```yaml
+   vars:
+     KUBECTL_CONTEXT: cs-gke-sandbox
+     KUBECTL_NAMESPACE: cgruel-sra
+   ```
+
+   Alternatively, you can override these variables when running tasks:
+
+   ```sh
+   task d KUBECTL_CONTEXT=my-context KUBECTL_NAMESPACE=my-namespace
+   ```
+
+3. Build and push the Docker image: 
+   ```sh
+   task p
+   ```
+   (Full command: `task push`)
+
+4. Deploy the application: 
+   ```sh
+   task d
+   ```
+   (Full command: `task deploy`)
+
+For a complete build, push, and deploy process, you can use: 
+```sh
+task bpd
+```
+(Full command: `task build-push-deploy`)
+
+To increment the version, build, push, and deploy in one command, use: 
+```sh
+task ibpd
+```
+(Full command: `task increment-build-push-deploy`)
+
+These commands will use the context and namespace specified in the Taskfile or the ones you've overridden via command-line arguments.
+
+Remember to review and update other configuration files as needed, such as `kustomization.yaml`, to ensure they align with your deployment environment.
 
 
 ## Application Sequence
@@ -153,3 +191,4 @@ This project is licensed under the MIT License. See the [LICENSE](LICENSE) file 
 ## TODO
 
 - [ ] Add support for Nix Shell and/or devcontainers
+
