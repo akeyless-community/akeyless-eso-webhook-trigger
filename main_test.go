@@ -81,9 +81,12 @@ func TestEnvironmentVariables(t *testing.T) {
 			basicAuthUser = os.Getenv("BASIC_AUTH_USER")
 			basicAuthPassword = os.Getenv("BASIC_AUTH_PASSWORD")
 
+			err := checkEnvironmentVariables()
 			if tt.wantErr {
-				assert.Equal(t, tt.errMsg, "Error: BASIC_AUTH_USER and BASIC_AUTH_PASSWORD environment variables must be set.")
+				assert.Error(t, err)
+				assert.Equal(t, tt.errMsg, err.Error())
 			} else {
+				assert.NoError(t, err)
 				assert.NotEmpty(t, basicAuthUser)
 				assert.NotEmpty(t, basicAuthPassword)
 			}
