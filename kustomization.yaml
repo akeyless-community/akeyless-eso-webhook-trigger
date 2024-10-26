@@ -4,7 +4,7 @@ kind: Kustomization
 images:
 - name: devorbitus/eso-updater
   newName: devorbitus/eso-updater
-  newTag: 1.0.6
+  newTag: 1.1.2
 
 secretGenerator:
 - envs:

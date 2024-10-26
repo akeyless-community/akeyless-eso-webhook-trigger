@@ -27,8 +27,10 @@ var ExternalSecretGVR = schema.GroupVersionResource{
 
 // BasicAuth credentials as GoFr environment variables
 var (
-	basicAuthUser     = os.Getenv("BASIC_AUTH_USER")
-	basicAuthPassword = os.Getenv("BASIC_AUTH_PASSWORD")
+	basicAuthUser           = os.Getenv("BASIC_AUTH_USER")
+	basicAuthPassword       = os.Getenv("BASIC_AUTH_PASSWORD")
+	enableCacheBuster       = os.Getenv("ENABLE_CACHE_BUSTER") == "true"
+	cacheBusterWaitInterval = 2 * time.Second
 )
 
 var dynamicNewForConfig = dynamic.NewForConfig
@@ -50,7 +52,8 @@ type Event struct {
 	Payload    map[string]string `json:"payload,omitempty"`
 }
 
-// Define your custom middleware function
+// We are making sure that the content type is set to "application/json; charset=utf-8"
+// so that the WebhookHandler can parse the incoming events
 func customMiddleware() gofrHTTP.Middleware {
 	return func(inner http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -80,6 +83,7 @@ func main() {
 
 	// Register middleware for basic authentication
 	app.EnableBasicAuth(basicAuthUser, basicAuthPassword)
+
 	// Define the route for webhook events
 	app.POST("/webhook", WebhookHandler)
 
@@ -90,6 +94,8 @@ func main() {
 // WebhookHandler is the main handler for incoming webhook requests
 // It processes the incoming events and triggers the patching of ExternalSecrets if necessary.
 func WebhookHandler(ctx *gofr.Context) (interface{}, error) {
+	// Get the cache buster wait interval from the environment variable
+	cacheBusterWaitInterval = getEnvDuration(ctx, "CACHE_BUSTER_WAIT_INTERVAL", 2*time.Second)
 
 	// Decode the incoming webhook event into a slice of Event structs
 	var events []Event
@@ -156,7 +162,6 @@ func patchExternalSecret(ctx *gofr.Context, itemName string) error {
 	// Iterate over each ExternalSecret and process it
 	for _, es := range externalSecrets.Items {
 		name := es.GetName()
-		annotations := es.GetAnnotations()
 		ctx.Logger.Infof("Processing ExternalSecret: %s\n", name)
 
 		// Access the spec field
@@ -203,32 +208,83 @@ func patchExternalSecret(ctx *gofr.Context, itemName string) error {
 
 		if keyFound {
 			ctx.Logger.Infof("Desired key found in ExternalSecret %s\n", name)
-			// Update annotation
-			if annotations == nil {
-				annotations = make(map[string]string)
-			}
-
-			var currentTimestamp = time.Now().Format(time.RFC3339)
-			// Patch the new annotation
-			annotations["updated-by"] = "externalsecret-updater"
-			annotations["updated-at"] = currentTimestamp
-			es.SetAnnotations(annotations)
-
-			// Log the updated annotations
-			ctx.Logger.Debugf("Updated annotations for ExternalSecret %s: , updated-at=%s\n", name, annotations["updated-at"])
-
-			// Update the ExternalSecret resource
-			if _, err = dynamicClient.Resource(ExternalSecretGVR).Namespace(namespace).Update(ctx, &es, metav1.UpdateOptions{}); err != nil {
+			if err := updateExternalSecret(ctx, dynamicClient, &es, namespace); err != nil {
 				ctx.Logger.Errorf("Failed to update ExternalSecret %s: %v\n", name, err)
 				return err
-			} else {
-				ctx.Logger.Infof("Successfully updated ExternalSecret %s\n", name)
 			}
+			ctx.Logger.Infof("Successfully updated ExternalSecret %s\n", name)
 		} else {
 			ctx.Logger.Infof("Desired key '%s' not found in ExternalSecret %s\n", itemName, name)
+			return nil
 		}
 	}
 	return nil
+}
+
+func updateExternalSecret(ctx *gofr.Context, dynamicClient dynamic.Interface, es *unstructured.Unstructured, namespace string) error {
+	name := es.GetName()
+
+	// Function to update annotations and perform the update
+	updateFunc := func(es *unstructured.Unstructured) error {
+		annotations := es.GetAnnotations()
+		if annotations == nil {
+			annotations = make(map[string]string)
+		}
+
+		annotations["updated-by"] = "externalsecret-updater"
+		annotations["updated-at"] = time.Now().Format(time.RFC3339)
+		es.SetAnnotations(annotations)
+
+		ctx.Logger.Infof("Updating ExternalSecret %s in namespace %s", name, namespace)
+		_, err := dynamicClient.Resource(ExternalSecretGVR).Namespace(namespace).Update(ctx, es, metav1.UpdateOptions{})
+		if err != nil {
+			ctx.Logger.Errorf("Failed to update ExternalSecret %s: %v", name, err)
+			return err
+		}
+		ctx.Logger.Infof("Successfully updated ExternalSecret %s", name)
+		return nil
+	}
+
+	// Perform the first update
+	if err := updateFunc(es); err != nil {
+		return err
+	}
+
+	if enableCacheBuster {
+		ctx.Logger.Infof("Cache buster enabled. Waiting for %v before second update", cacheBusterWaitInterval)
+		time.Sleep(cacheBusterWaitInterval)
+
+		// Fetch the latest version of the ExternalSecret
+		latestES, err := dynamicClient.Resource(ExternalSecretGVR).Namespace(namespace).Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			ctx.Logger.Errorf("Failed to fetch latest ExternalSecret %s: %v", name, err)
+			return err
+		}
+
+		ctx.Logger.Infof("Performing second update on ExternalSecret %s to bust cache", name)
+		if err := updateFunc(latestES); err != nil {
+			return err
+		}
+		ctx.Logger.Infof("Successfully performed second update on ExternalSecret %s", name)
+	} else {
+		ctx.Logger.Info("Cache buster is disabled")
+	}
+
+	return nil
+}
+
+// Helper function to get duration from environment variable with a default value
+func getEnvDuration(ctx *gofr.Context, key string, defaultValue time.Duration) time.Duration {
+	value := os.Getenv(key)
+	if value == "" {
+		return defaultValue
+	}
+	duration, err := time.ParseDuration(value)
+	if err != nil {
+		ctx.Logger.Errorf("Invalid duration for %s, using default: %v", key, err)
+		return defaultValue
+	}
+	return duration
 }
 
 // logRequestDetails logs the entire request details

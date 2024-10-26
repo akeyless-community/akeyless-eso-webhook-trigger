@@ -2,7 +2,7 @@
     "openapi": "3.0.0",
     "info": {
         "title": "ExternalSecret Updater API",
-        "version": "1.0.6",
+        "version": "1.1.2",
         "description": "API for updating ExternalSecrets in Kubernetes based on webhook events"
     },
     "paths": {
@@ -13,7 +13,7 @@
                 "requestBody": {
                     "required": true,
                     "content": {
-                        "application/json": {
+                        "application/json; charset=utf-8": {
                             "schema": {
                                 "type": "array",
                                 "items": {
