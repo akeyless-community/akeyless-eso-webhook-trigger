@@ -171,38 +171,19 @@ func patchExternalSecret(ctx *gofr.Context, itemName string) error {
 			continue
 		}
 
-		// Access the data field, which is a slice
+		keyFound := false
+
+		// Check data[] structure
 		dataList, found, err := unstructured.NestedSlice(spec, "data")
-		if err != nil || !found {
-			ctx.Logger.Errorf("spec.data not found for ExternalSecret %s: %v\n", name, err)
-			continue
+		if err == nil && found {
+			keyFound = checkDataStructure(ctx, dataList, itemName, name)
 		}
 
-		keyFound := false
-		for _, item := range dataList {
-			dataMap, ok := item.(map[string]interface{})
-			if !ok {
-				ctx.Logger.Errorf("Invalid data item in ExternalSecret %s\n", name)
-				continue
-			}
-
-			remoteRef, found, err := unstructured.NestedMap(dataMap, "remoteRef")
-			if err != nil || !found {
-				ctx.Logger.Errorf("remoteRef not found in data item of ExternalSecret %s: %v\n", name, err)
-				continue
-			}
-
-			key, found, err := unstructured.NestedString(remoteRef, "key")
-			if err != nil || !found {
-				ctx.Logger.Errorf("key not found in remoteRef of ExternalSecret %s: %v\n", name, err)
-				continue
-			}
-
-			ctx.Logger.Infof("Found key in ExternalSecret %s: %s\n", name, key)
-
-			if key == itemName {
-				keyFound = true
-				break
+		// Check dataFrom[] structure if key not found in data[]
+		if !keyFound {
+			dataFromList, found, err := unstructured.NestedSlice(spec, "dataFrom")
+			if err == nil && found {
+				keyFound = checkDataFromStructure(ctx, dataFromList, itemName, name)
 			}
 		}
 
@@ -215,10 +196,67 @@ func patchExternalSecret(ctx *gofr.Context, itemName string) error {
 			ctx.Logger.Infof("Successfully updated ExternalSecret %s\n", name)
 		} else {
 			ctx.Logger.Infof("Desired key '%s' not found in ExternalSecret %s\n", itemName, name)
-			return nil
 		}
 	}
 	return nil
+}
+
+func checkDataStructure(ctx *gofr.Context, dataList []interface{}, itemName, esName string) bool {
+	for _, item := range dataList {
+		dataMap, ok := item.(map[string]interface{})
+		if !ok {
+			ctx.Logger.Errorf("Invalid data item in ExternalSecret %s\n", esName)
+			continue
+		}
+
+		remoteRef, found, err := unstructured.NestedMap(dataMap, "remoteRef")
+		if err != nil || !found {
+			ctx.Logger.Errorf("remoteRef not found in data item of ExternalSecret %s: %v\n", esName, err)
+			continue
+		}
+
+		key, found, err := unstructured.NestedString(remoteRef, "key")
+		if err != nil || !found {
+			ctx.Logger.Errorf("key not found in remoteRef of ExternalSecret %s: %v\n", esName, err)
+			continue
+		}
+
+		ctx.Logger.Infof("Found key in ExternalSecret %s data[]: %s\n", esName, key)
+
+		if key == itemName {
+			return true
+		}
+	}
+	return false
+}
+
+func checkDataFromStructure(ctx *gofr.Context, dataFromList []interface{}, itemName, esName string) bool {
+	for _, item := range dataFromList {
+		dataFromMap, ok := item.(map[string]interface{})
+		if !ok {
+			ctx.Logger.Errorf("Invalid dataFrom item in ExternalSecret %s\n", esName)
+			continue
+		}
+
+		extract, found, err := unstructured.NestedMap(dataFromMap, "extract")
+		if err != nil || !found {
+			ctx.Logger.Errorf("extract not found in dataFrom item of ExternalSecret %s: %v\n", esName, err)
+			continue
+		}
+
+		key, found, err := unstructured.NestedString(extract, "key")
+		if err != nil || !found {
+			ctx.Logger.Errorf("key not found in extract of ExternalSecret %s: %v\n", esName, err)
+			continue
+		}
+
+		ctx.Logger.Infof("Found key in ExternalSecret %s dataFrom[]: %s\n", esName, key)
+
+		if key == itemName {
+			return true
+		}
+	}
+	return false
 }
 
 func updateExternalSecret(ctx *gofr.Context, dynamicClient dynamic.Interface, es *unstructured.Unstructured, namespace string) error {

@@ -165,7 +165,7 @@ sequenceDiagram
         EsoUpdater ->> KubeAPI: List ExternalSecrets in namespace
         KubeAPI -->> EsoUpdater: ExternalSecrets list response
         loop Check each ExternalSecret
-            EsoUpdater ->> ExternalSecret: Access spec.data and remoteRef.key
+            EsoUpdater ->> ExternalSecret: Access spec.data[].remoteRef.key or spec.dataFrom[].extract.key
             alt Matching key found
                 EsoUpdater ->> ExternalSecret: Update annotations (updated-by, updated-at)
                 EsoUpdater ->> KubeAPI: PATCH ExternalSecret with new annotations
