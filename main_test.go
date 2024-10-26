@@ -122,16 +122,13 @@ func TestWebhookHandler(t *testing.T) {
 			// Create mock container
 			mockContainer, _ := container.NewMockContainer(t)
 
-			// Create test request
-			req := httptest.NewRequest(http.MethodPost, "/webhook", bytes.NewBuffer([]byte(tt.requestBody)))
+			// Create test request using GoFr's HTTP package
+			req := gofrHTTP.NewRequest(http.MethodPost, "/webhook", bytes.NewBuffer([]byte(tt.requestBody)))
 			req.Header.Set("Content-Type", "application/json")
 
 			// Create GoFr context
-			ctx := &gofr.Context{
-				Context:   context.Background(),
-				Request:   req,
-				Container: mockContainer,
-			}
+			ctx := gofr.NewContext(req, nil, app)
+			ctx.Container = mockContainer
 
 			// Call handler
 			_, err := WebhookHandler(ctx)

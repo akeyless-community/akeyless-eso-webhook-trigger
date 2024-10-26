@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -69,10 +70,16 @@ func customMiddleware() gofrHTTP.Middleware {
 	}
 }
 
-func main() {
-	// Ensure that BASIC_AUTH_USER and BASIC_AUTH_PASSWORD are set
+func checkEnvironmentVariables() error {
 	if basicAuthUser == "" || basicAuthPassword == "" {
-		log.Fatal("Error: BASIC_AUTH_USER and BASIC_AUTH_PASSWORD environment variables must be set.")
+		return fmt.Errorf("Error: BASIC_AUTH_USER and BASIC_AUTH_PASSWORD environment variables must be set.")
+	}
+	return nil
+}
+
+func main() {
+	if err := checkEnvironmentVariables(); err != nil {
+		log.Fatal(err)
 	}
 
 	// Create a new GoFr app
