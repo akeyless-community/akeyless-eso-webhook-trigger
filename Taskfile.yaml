@@ -19,6 +19,8 @@ tasks:
       - go.sum
       - ./**/*.go
       - static/openapi.json
+      - kustomization.yaml
+    method: checksum
     requires:
       vars:
         - PLATFORMS
