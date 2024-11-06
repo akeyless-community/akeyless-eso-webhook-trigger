@@ -4,7 +4,7 @@ kind: Kustomization
 images:
 - name: devorbitus/eso-updater
   newName: devorbitus/eso-updater
-  newTag: 1.1.3
+  newTag: 1.2.0
 
 secretGenerator:
 - envs:
@@ -15,6 +15,6 @@ resources:
 - manifests/service-account.yaml
 - manifests/deployment.yaml
 - manifests/service.yaml
-- manifests/role.yaml
-- manifests/role-binding.yaml
+- manifests/cluster-role.yaml
+- manifests/cluster-role-binding.yaml
 - manifests/ingress.yaml

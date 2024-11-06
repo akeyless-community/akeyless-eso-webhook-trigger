@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"time"
+	"strings"
 
 	"gofr.dev/pkg/gofr"
 	gofrHTTP "gofr.dev/pkg/gofr/http"
@@ -72,7 +73,7 @@ func customMiddleware() gofrHTTP.Middleware {
 
 func checkEnvironmentVariables() error {
 	if basicAuthUser == "" || basicAuthPassword == "" {
-		return fmt.Errorf("Error: BASIC_AUTH_USER and BASIC_AUTH_PASSWORD environment variables must be set.")
+		return fmt.Errorf("error: BASIC_AUTH_USER and BASIC_AUTH_PASSWORD environment variables must be set")
 	}
 	return nil
 }
@@ -153,56 +154,80 @@ func patchExternalSecret(ctx *gofr.Context, itemName string) error {
 		ctx.Logger.Fatalf("Failed to create dynamic Kubernetes client: %v", err)
 	}
 
-	// Retrieve the namespace from the in-cluster config
-	namespace, err := getNamespace()
+	var namespaces []string
+
+	// Attempt to list all namespaces
+	namespacesList, err := dynamicClient.Resource(schema.GroupVersionResource{
+		Group:    "",
+		Version:  "v1",
+		Resource: "namespaces",
+	}).List(ctx, metav1.ListOptions{})
 	if err != nil {
-		ctx.Logger.Errorf("Failed to get namespace: %v", err)
-		namespace = "default" // Fallback to default if retrieval fails
+		ctx.Logger.Warnf("Failed to list namespaces: %v. Falling back to the deployed namespace.", err)
+		// Fallback to the current namespace
+		namespace, err := getNamespace()
+		if err != nil {
+			ctx.Logger.Errorf("Failed to get namespace: %v", err)
+			return err
+		}
+		namespaces = []string{namespace} // Only use the current namespace
+	} else {
+		// If listing succeeded, collect all namespace names
+		for _, ns := range namespacesList.Items {
+			namespaces = append(namespaces, ns.GetName())
+		}
 	}
 
-	// List all ExternalSecrets in the namespace
-	externalSecrets, err := dynamicClient.Resource(ExternalSecretGVR).Namespace(namespace).List(ctx, metav1.ListOptions{})
-	if err != nil {
-		ctx.Logger.Fatalf("Failed to list ExternalSecrets in namespace %s: %v", namespace, err)
-	}
+	// Iterate through each namespace
+	for _, namespace := range namespaces {
+		ctx.Logger.Infof("Checking namespace: %s", namespace)
 
-	// Iterate over each ExternalSecret and process it
-	for _, es := range externalSecrets.Items {
-		name := es.GetName()
-		ctx.Logger.Infof("Processing ExternalSecret: %s\n", name)
-
-		// Access the spec field
-		spec, found, err := unstructured.NestedMap(es.Object, "spec")
-		if err != nil || !found {
-			ctx.Logger.Errorf("Error retrieving spec for ExternalSecret %s: %v\n", name, err)
+		// List all ExternalSecrets in the current namespace
+		externalSecrets, err := dynamicClient.Resource(ExternalSecretGVR).Namespace(namespace).List(ctx, metav1.ListOptions{})
+		if err != nil {
+			// Log error but continue with other namespaces if we don't have access
+			ctx.Logger.Errorf("Failed to list ExternalSecrets in namespace %s: %v", namespace, err)
 			continue
 		}
 
-		keyFound := false
+		// Iterate over each ExternalSecret and process it
+		for _, es := range externalSecrets.Items {
+			name := es.GetName()
+			ctx.Logger.Infof("Processing ExternalSecret: %s in namespace %s\n", name, namespace)
 
-		// Check data[] structure
-		dataList, found, err := unstructured.NestedSlice(spec, "data")
-		if err == nil && found {
-			keyFound = checkDataStructure(ctx, dataList, itemName, name)
-		}
+			// Access the spec field
+			spec, found, err := unstructured.NestedMap(es.Object, "spec")
+			if err != nil || !found {
+				ctx.Logger.Errorf("Error retrieving spec for ExternalSecret %s/%s: %v\n", namespace, name, err)
+				continue
+			}
 
-		// Check dataFrom[] structure if key not found in data[]
-		if !keyFound {
-			dataFromList, found, err := unstructured.NestedSlice(spec, "dataFrom")
+			keyFound := false
+
+			// Check data[] structure
+			dataList, found, err := unstructured.NestedSlice(spec, "data")
 			if err == nil && found {
-				keyFound = checkDataFromStructure(ctx, dataFromList, itemName, name)
+				keyFound = checkDataStructure(ctx, dataList, itemName, name)
 			}
-		}
 
-		if keyFound {
-			ctx.Logger.Infof("Desired key found in ExternalSecret %s\n", name)
-			if err := updateExternalSecret(ctx, dynamicClient, &es, namespace); err != nil {
-				ctx.Logger.Errorf("Failed to update ExternalSecret %s: %v\n", name, err)
-				return err
+			// Check dataFrom[] structure if key not found in data[]
+			if !keyFound {
+				dataFromList, found, err := unstructured.NestedSlice(spec, "dataFrom")
+				if err == nil && found {
+					keyFound = checkDataFromStructure(ctx, dataFromList, itemName, name)
+				}
 			}
-			ctx.Logger.Infof("Successfully updated ExternalSecret %s\n", name)
-		} else {
-			ctx.Logger.Infof("Desired key '%s' not found in ExternalSecret %s\n", itemName, name)
+
+			if keyFound {
+				ctx.Logger.Infof("Desired key found in ExternalSecret %s/%s\n", namespace, name)
+				if err := updateExternalSecret(ctx, dynamicClient, &es, namespace); err != nil {
+					ctx.Logger.Errorf("Failed to update ExternalSecret %s/%s: %v\n", namespace, name, err)
+					return err
+				}
+				ctx.Logger.Infof("Successfully updated ExternalSecret %s/%s\n", namespace, name)
+			} else {
+				ctx.Logger.Infof("Desired key '%s' not found in ExternalSecret %s/%s\n", itemName, namespace, name)
+			}
 		}
 	}
 	return nil
@@ -230,7 +255,11 @@ func checkDataStructure(ctx *gofr.Context, dataList []interface{}, itemName, esN
 
 		ctx.Logger.Infof("Found key in ExternalSecret %s data[]: %s\n", esName, key)
 
-		if key == itemName {
+		// Trim leading slashes for comparison
+		trimmedKey := strings.TrimPrefix(key, "/")
+		trimmedItemName := strings.TrimPrefix(itemName, "/")
+
+		if trimmedKey == trimmedItemName {
 			return true
 		}
 	}

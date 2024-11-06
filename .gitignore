@@ -90,3 +90,4 @@ $RECYCLE.BIN/
 
 # Taskfile cache directory
 .task/
+.aider*
