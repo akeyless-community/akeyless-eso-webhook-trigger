@@ -288,7 +288,11 @@ func checkDataFromStructure(ctx *gofr.Context, dataFromList []interface{}, itemN
 
 		ctx.Logger.Infof("Found key in ExternalSecret %s dataFrom[]: %s\n", esName, key)
 
-		if key == itemName {
+		// Trim leading slashes for comparison
+		trimmedKey := strings.TrimPrefix(key, "/")
+		trimmedItemName := strings.TrimPrefix(itemName, "/")
+
+		if trimmedKey == trimmedItemName {
 			return true
 		}
 	}
